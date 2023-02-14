@@ -96,7 +96,7 @@ impl ExampleBrowser {
         let start_time = std::time::Instant::now();
 
         loop {
-            match self.tab.wait_for_element(selector) {
+            match self.tab.find_element(selector) {
                 Ok(element) => {
                     let box_model = element.get_box_model()?;
                     if box_model.width == 0.0 || box_model.height == 0.0 {
@@ -116,4 +116,14 @@ impl ExampleBrowser {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
+
+    pub fn reload(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.tab.reload(true, None)?;
+        self.tab.wait_until_navigated()?;
+        Ok(())
+    }
+
+    
 }
+
+// implement more advanced methods
