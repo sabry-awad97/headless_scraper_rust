@@ -62,4 +62,23 @@ impl ExampleBrowser {
 
         Ok(())
     }
+
+    pub fn fill_form(&self, form_data: &[(String, String)]) -> Result<(), Box<dyn std::error::Error>> {
+        let form = self.tab.wait_for_element("form")?;
+
+        for (name, value) in form_data {
+            let input = form.find_element(&format!("input[name='{}']", name))?;
+            input.click()?;
+            input.parent.type_str(value)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn click_link(&self, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let link = self.tab.wait_for_element(&format!("a:contains('{}')", text))?;
+        link.click()?;
+        self.tab.wait_until_navigated()?;
+        Ok(())
+    }
 }
