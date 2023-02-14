@@ -1,4 +1,5 @@
-use headless_chrome::{Browser, LaunchOptionsBuilder, Tab};
+use headless_chrome::{protocol::cdp::Page, Browser, LaunchOptionsBuilder, Tab};
+use std::fs::write;
 use std::sync::Arc;
 
 pub enum ExamplePage {
@@ -8,7 +9,7 @@ pub enum ExamplePage {
 }
 
 impl ExamplePage {
-    fn url(&self) -> &str {
+    pub fn url(&self) -> &str {
         match self {
             ExamplePage::HomePage => "https://www.example.com",
             ExamplePage::AboutPage => "https://www.example.com/about",
@@ -39,5 +40,26 @@ impl ExampleBrowser {
 
     pub fn get_title(&self) -> Result<String, Box<dyn std::error::Error>> {
         self.tab.get_title().map_err(|e| e.into())
+    }
+
+    pub fn get_url(&self) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(self.tab.get_url())
+    }
+
+    pub fn get_html(&self) -> Result<String, Box<dyn std::error::Error>> {
+        self.tab.get_content().map_err(|e| e.into())
+    }
+
+    pub fn screenshot(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let jpeg_data = self.tab.capture_screenshot(
+            Page::CaptureScreenshotFormatOption::Jpeg,
+            None,
+            None,
+            true,
+        )?;
+
+        write(path, &jpeg_data)?;
+
+        Ok(())
     }
 }
