@@ -1,5 +1,6 @@
 use headless_chrome::Browser;
 use headless_chrome::{protocol::cdp::Page, LaunchOptionsBuilder};
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 
@@ -49,19 +50,42 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let button_selector = ".oke-showMore-button-text.oke-button-text";
+    let main_selector = ".oke-w-reviews-list-item";
+    let field_names = vec!["title", "text", "date", "name"];
+    let selectors = vec![
+        ".oke-reviewContent-title.oke-title",
+        ".oke-reviewContent-body.oke-bodyText",
+        ".oke-reviewContent-date",
+        ".oke-w-reviewer-name",
+    ];
 
     loop {
         if let Ok(button_element) = tab.wait_for_element(button_selector) {
-            if let Ok(box_model) = button_element.get_box_model() {
-                println!("width {}, height {}", box_model.width, box_model.height);
-                if let Err(e) = button_element.click() {
-                    eprintln!("Failed to click on element: {}", e);
+            if let Err(e) = button_element.click() {
+                eprintln!("Failed to click on element: {}", e);
+            }
+
+            let parents = tab.find_elements(main_selector)?;
+            for parent in parents {
+                let mut element_map: HashMap<&str, Vec<String>> = HashMap::new();
+                
+                for (field_name, selector) in field_names.iter().zip(selectors.iter()) {
+                    if let Ok(child) = parent.find_elements(selector) {
+                        for el in child {
+                            if let Ok(text) = el.get_inner_text() {
+                                element_map.entry(field_name).or_default().push(text);
+                            }
+                        }
+                    }
                 }
-            } else {
-                eprintln!("Failed to get box model for element");
+                
+                println!("{:?}", element_map);
             }
         } else {
             eprintln!("Failed to find element with selector '{}'", button_selector);
+            break;
         }
     }
+
+    Ok(())
 }
