@@ -42,7 +42,7 @@ impl Serialize for Review {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum FieldType {
     Title,
     Text,
@@ -128,41 +128,7 @@ impl ExtractReviews for Arc<Tab> {
 
         loop {
             let start_iteration_time = Instant::now();
-            // Extract reviews on the page
-            let html = self.get_content()?;
-            let document = Html::parse_document(&html);
-            let review_elements = document.select(&main_selector);
-            for element in review_elements.skip(previous_length) {
-                let mut field_values = HashMap::new();
-
-                for field in fields {
-                    let value = field.extract_value(element)?;
-                    field_values.insert(field.name, value);
-                }
-
-                reviews.push(Review::from_map(field_values));
-            }
-
-            let end_iteration_time = Instant::now();
-            let elapsed_iteration_time = end_iteration_time - start_iteration_time;
-            let elapsed_time = start_time.elapsed();
-            let elapsed_iteration_secs = elapsed_iteration_time.as_secs_f64();
-            let elapsed_secs = elapsed_time.as_secs_f64();
-
-            let current_length = reviews.len();
-
-            if current_length != previous_length {
-                println!("No new reviews found in the last iteration");
-                page_number += 1;
-            }
-
-            println!(
-                "Elapsed time for last iteration: {:.3} seconds",
-                elapsed_iteration_secs
-            );
-            println!("Total elapsed time: {:.3} seconds", elapsed_secs);
-            println!("Number of reviews: {}", current_length);
-            println!("Page number: {}", page_number);
+            let mut current_length = reviews.len();
 
             if let Some(max_reviews) = max_reviews {
                 if current_length >= max_reviews {
@@ -176,12 +142,54 @@ impl ExtractReviews for Arc<Tab> {
                 }
             }
 
+            // Extract reviews on the page
+            let html = self.get_content()?;
+            let document = Html::parse_document(&html);
+            let review_elements = document.select(&main_selector);
+            for element in review_elements.skip(previous_length) {
+                let mut field_values = HashMap::new();
+
+                for field in fields {
+                    let value = field.extract_value(element)?;
+                    field_values.insert(field.name, value);
+                }
+
+                reviews.push(Review::from_map(field_values));
+                current_length = reviews.len();
+
+                // Stop if we've extracted the maximum number of reviews
+                if let Some(max) = max_reviews {
+                    if current_length >= max {
+                        break;
+                    }
+                }
+            }
+
+            if current_length == previous_length {
+                println!("No new reviews found in the last iteration");
+            } else {
+                page_number += 1;
+            }
+
             previous_length = current_length;
+
+            let end_iteration_time = Instant::now();
+            let elapsed_iteration_time = end_iteration_time - start_iteration_time;
+            let elapsed_time = start_time.elapsed();
+            let elapsed_iteration_secs = elapsed_iteration_time.as_secs_f64();
+            let elapsed_secs = elapsed_time.as_secs_f64();
+
+            println!(
+                "Elapsed time for last iteration: {:.3} seconds",
+                elapsed_iteration_secs
+            );
+            println!("Total elapsed time: {:.3} seconds", elapsed_secs);
+            println!("Number of reviews: {}", current_length);
+            println!("Page number: {}", page_number);
 
             match self.wait_for_element(button_css_selector) {
                 Ok(element) => {
                     element.click()?;
-                    self.wait_until_navigated()?;
                 }
                 Err(_) => break,
             };
@@ -229,10 +237,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     ];
 
-    let reviews = Arc::new(tab).extract_reviews(&fields, Some(5), Some(20))?;
+    let reviews = Arc::new(tab).extract_reviews(&fields, None, None)?;
 
     let mut writer = Writer::from_path("reviews.csv")?;
-    writer.write_record(&["Title", "Text", "Date", "Name"])?;
 
     for review in reviews {
         writer.serialize(review)?;
