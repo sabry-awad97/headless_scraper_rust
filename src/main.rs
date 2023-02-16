@@ -5,6 +5,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
+use std::thread;
 
 #[derive(Serialize, Debug)]
 struct Review {
@@ -65,7 +66,11 @@ impl Selectors {
     }
 }
 
-fn get_reviews(tab: Arc<Tab>) -> Result<Vec<Review>, Box<dyn Error>> {
+fn get_reviews(
+    tab: Arc<Tab>,
+    page_reviews: Option<usize>,
+    max_reviews: Option<usize>,
+) -> Result<Vec<Review>, Box<dyn Error>> {
     let mut reviews = Vec::new();
 
     let button_selector = Selectors::ButtonSelector.selector();
@@ -78,6 +83,7 @@ fn get_reviews(tab: Arc<Tab>) -> Result<Vec<Review>, Box<dyn Error>> {
     ];
 
     let mut previous_length = 0;
+    let mut page_number = 1;
     loop {
         let parents = tab.find_elements(main_selector)?;
         for parent in &parents[previous_length..] {
@@ -91,13 +97,21 @@ fn get_reviews(tab: Arc<Tab>) -> Result<Vec<Review>, Box<dyn Error>> {
                 element_map.insert(field_selector.field_name().unwrap_or_default(), values);
             }
             reviews.push(Review::from_map(element_map));
-            previous_length = reviews.len();
         }
-        println!("{}", previous_length);
 
-        if previous_length == 10 {
-            break;
+        if let Some(max_reviews) = max_reviews {
+            if reviews.len() >= max_reviews {
+                return Ok(reviews);
+            }
         }
+
+        if let Some(page_reviews) = page_reviews {
+            if previous_length % page_reviews != 0 {
+                break;
+            }
+        }
+
+        previous_length = parents.len();
 
         let button_element = match tab.wait_for_element(button_selector) {
             Ok(elem) => elem,
@@ -107,6 +121,12 @@ fn get_reviews(tab: Arc<Tab>) -> Result<Vec<Review>, Box<dyn Error>> {
         if let Err(_) = button_element.click() {
             return Err(Box::new(FindError::ClickError));
         }
+
+        thread::sleep(std::time::Duration::from_secs(1));
+
+        page_number += 1;
+
+        println!("{}", page_number);
     }
 
     Ok(reviews)
@@ -130,7 +150,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("Failed while waiting for navigation: {}", e);
     }
 
-    let reviews = get_reviews(tab)?;
+    let reviews = get_reviews(tab, None, None)?;
 
     let mut csv_writer = Writer::from_path("reviews.csv")?;
 
