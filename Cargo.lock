@@ -413,8 +413,10 @@ dependencies = [
 name = "headless_scraper"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "csv",
  "headless_chrome",
+ "log",
  "scraper",
  "serde",
  "serde_json",

@@ -12,3 +12,5 @@ tokio = { version = "1.25.0", features = ["full"] }
 csv = "1.2.0"
 serde = "1.0.152"
 scraper = "0.14.0"
+anyhow = "1.0.69"
+log = "0.4.17"

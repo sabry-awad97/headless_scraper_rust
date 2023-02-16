@@ -1,11 +1,12 @@
 use csv::Writer;
 use headless_chrome::LaunchOptionsBuilder;
 use headless_chrome::{Browser, Tab};
+use scraper::{Html, Selector};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
-use scraper::{Html, Selector};
+use std::time::Instant;
 
 #[derive(Serialize, Debug)]
 struct Review {
@@ -48,32 +49,46 @@ fn get_reviews(
     page_reviews: Option<usize>,
     max_reviews: Option<usize>,
 ) -> Result<Vec<Review>, Box<dyn Error>> {
+    let start_time = Instant::now();
     let mut reviews = Vec::new();
 
     let button_css_selector = ".oke-showMore-button-text.oke-button-text";
     let main_selector = Selector::parse(".oke-w-reviews-list-item").unwrap();
     let field_selectors = [
-        (Selector::parse(".oke-reviewContent-title.oke-title").unwrap(), "title"),
-        (Selector::parse(".oke-reviewContent-body.oke-bodyText").unwrap(), "text"),
+        (
+            Selector::parse(".oke-reviewContent-title.oke-title").unwrap(),
+            "title",
+        ),
+        (
+            Selector::parse(".oke-reviewContent-body.oke-bodyText").unwrap(),
+            "text",
+        ),
         (Selector::parse(".oke-reviewContent-date").unwrap(), "date"),
         (Selector::parse(".oke-w-reviewer-name").unwrap(), "name"),
     ];
 
     let mut previous_length = 0;
-    let mut page_number = 1;
+    let mut page_number = 0;
     loop {
+        let start_iteration_time = Instant::now();
+
         let html = tab.get_content()?;
         let document = Html::parse_document(html.as_str());
-        let parents = document.select(&main_selector).skip(previous_length).collect::<Vec<_>>();
+        let parents = document
+            .select(&main_selector)
+            .skip(previous_length)
+            .collect::<Vec<_>>();
         for parent in parents {
             let mut element_map = HashMap::new();
             for (field_selector, field_name) in field_selectors.iter() {
-                let child = parent.select(&field_selector).next().ok_or_else(|| FindError::ElementNotFound)?;
+                let child = parent
+                    .select(&field_selector)
+                    .next()
+                    .ok_or_else(|| FindError::ElementNotFound)?;
                 let value = child.text().collect::<Vec<_>>().join(", ");
                 element_map.insert(*field_name, value);
             }
             reviews.push(Review::from_map(element_map));
-            previous_length = reviews.len();
         }
 
         if let Some(max_reviews) = max_reviews {
@@ -88,25 +103,47 @@ fn get_reviews(
             }
         }
 
-        let button_element = match tab.wait_for_element(button_css_selector) {
-            Ok(elem) => elem,
-            Err(_) => break,
-        };
+        let end_iteration_time = Instant::now();
+        let elapsed_iteration_time = end_iteration_time - start_iteration_time;
+        let elapsed_time = start_time.elapsed();
+        let elapsed_iteration_secs = elapsed_iteration_time.as_secs_f64();
+        let elapsed_secs = elapsed_time.as_secs_f64();
 
-        if let Err(_) = button_element.click() {
-            return Err(Box::new(FindError::ClickError));
+        let current_length = reviews.len();
+
+        if current_length != previous_length {
+            println!("No new reviews found in the last iteration");
+            page_number += 1;
         }
 
-        page_number += 1;
+        println!(
+            "Elapsed time for last iteration: {:.3} seconds",
+            elapsed_iteration_secs
+        );
+        println!("Total elapsed time: {:.3} seconds", elapsed_secs);
+        println!("Number of reviews: {}", current_length);
+        println!("Page number: {}", page_number);
 
-        println!("{}", page_number);
+        previous_length = current_length;
+
+        let button_element = tab.wait_for_element(button_css_selector)?;
+
+        let box_model = match button_element.click() {
+            Err(_) => return Err(Box::new(FindError::ClickError)),
+            Ok(el) => el.get_box_model()?,
+        };
+
+        println!(
+            "button_element (width, height) ({}, {})",
+            box_model.width, box_model.height
+        );
     }
 
     Ok(reviews)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let browser = Browser::new(LaunchOptionsBuilder::default().headless(false).build()?)
+    let browser = Browser::new(LaunchOptionsBuilder::default().headless(true).build()?)
         .map_err(|e| format!("Failed to launch browser: {}", e))?;
 
     let tab = browser
@@ -123,7 +160,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("Failed while waiting for navigation: {}", e);
     }
 
+    let start_time = Instant::now();
+
     let reviews = get_reviews(tab, None, None)?;
+
+    let end_time = Instant::now();
+    let elapsed_time = end_time - start_time;
+    let elapsed_secs = elapsed_time.as_secs_f64();
+
+    println!(
+        "Retrieved {} reviews in {:.3} seconds",
+        reviews.len(),
+        elapsed_secs
+    );
 
     let mut csv_writer = Writer::from_path("reviews.csv")?;
 
