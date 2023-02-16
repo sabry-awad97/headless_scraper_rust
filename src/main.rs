@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
-use std::thread;
+use scraper::{Html, Selector};
 
 #[derive(Serialize, Debug)]
 struct Review {
@@ -16,12 +16,12 @@ struct Review {
 }
 
 impl Review {
-    fn from_map(map: HashMap<&str, Vec<String>>) -> Review {
+    fn from_map(map: HashMap<&str, String>) -> Review {
         Review {
-            title: map.get("title").unwrap().join(", ").to_owned(),
-            text: map.get("text").unwrap().join(", ").to_owned(),
-            date: map.get("date").unwrap().join(", ").to_owned(),
-            name: map.get("name").unwrap().join(", ").to_owned(),
+            title: map.get("title").unwrap().to_owned(),
+            text: map.get("text").unwrap().to_owned(),
+            date: map.get("date").unwrap().to_owned(),
+            name: map.get("name").unwrap().to_owned(),
         }
     }
 }
@@ -43,29 +43,6 @@ impl std::fmt::Display for FindError {
 
 impl Error for FindError {}
 
-enum Selectors {
-    ButtonSelector,
-    MainSelector,
-    FieldSelector(&'static str, &'static str),
-}
-
-impl Selectors {
-    fn selector(&self) -> &'static str {
-        match self {
-            Selectors::ButtonSelector => ".oke-showMore-button-text.oke-button-text",
-            Selectors::MainSelector => ".oke-w-reviews-list-item",
-            Selectors::FieldSelector(_, selector) => selector,
-        }
-    }
-
-    fn field_name(&self) -> Option<&'static str> {
-        match self {
-            Selectors::FieldSelector(field_name, _) => Some(field_name),
-            _ => None,
-        }
-    }
-}
-
 fn get_reviews(
     tab: Arc<Tab>,
     page_reviews: Option<usize>,
@@ -73,30 +50,30 @@ fn get_reviews(
 ) -> Result<Vec<Review>, Box<dyn Error>> {
     let mut reviews = Vec::new();
 
-    let button_selector = Selectors::ButtonSelector.selector();
-    let main_selector = Selectors::MainSelector.selector();
+    let button_css_selector = ".oke-showMore-button-text.oke-button-text";
+    let main_selector = Selector::parse(".oke-w-reviews-list-item").unwrap();
     let field_selectors = [
-        Selectors::FieldSelector("title", ".oke-reviewContent-title.oke-title"),
-        Selectors::FieldSelector("text", ".oke-reviewContent-body.oke-bodyText"),
-        Selectors::FieldSelector("date", ".oke-reviewContent-date"),
-        Selectors::FieldSelector("name", ".oke-w-reviewer-name"),
+        (Selector::parse(".oke-reviewContent-title.oke-title").unwrap(), "title"),
+        (Selector::parse(".oke-reviewContent-body.oke-bodyText").unwrap(), "text"),
+        (Selector::parse(".oke-reviewContent-date").unwrap(), "date"),
+        (Selector::parse(".oke-w-reviewer-name").unwrap(), "name"),
     ];
 
     let mut previous_length = 0;
     let mut page_number = 1;
     loop {
-        let parents = tab.find_elements(main_selector)?;
-        for parent in &parents[previous_length..] {
-            let mut element_map: HashMap<&str, Vec<String>> = HashMap::new();
-            for field_selector in field_selectors.iter() {
-                let child = parent.find_elements(field_selector.selector())?;
-                let values: Vec<String> = child
-                    .iter()
-                    .map(|element| element.get_inner_text().unwrap_or_default())
-                    .collect();
-                element_map.insert(field_selector.field_name().unwrap_or_default(), values);
+        let html = tab.get_content()?;
+        let document = Html::parse_document(html.as_str());
+        let parents = document.select(&main_selector).skip(previous_length).collect::<Vec<_>>();
+        for parent in parents {
+            let mut element_map = HashMap::new();
+            for (field_selector, field_name) in field_selectors.iter() {
+                let child = parent.select(&field_selector).next().ok_or_else(|| FindError::ElementNotFound)?;
+                let value = child.text().collect::<Vec<_>>().join(", ");
+                element_map.insert(*field_name, value);
             }
             reviews.push(Review::from_map(element_map));
+            previous_length = reviews.len();
         }
 
         if let Some(max_reviews) = max_reviews {
@@ -111,9 +88,7 @@ fn get_reviews(
             }
         }
 
-        previous_length = parents.len();
-
-        let button_element = match tab.wait_for_element(button_selector) {
+        let button_element = match tab.wait_for_element(button_css_selector) {
             Ok(elem) => elem,
             Err(_) => break,
         };
@@ -121,8 +96,6 @@ fn get_reviews(
         if let Err(_) = button_element.click() {
             return Err(Box::new(FindError::ClickError));
         }
-
-        thread::sleep(std::time::Duration::from_secs(1));
 
         page_number += 1;
 

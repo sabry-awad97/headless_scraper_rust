@@ -11,3 +11,4 @@ serde_json = "1.0.93"
 tokio = { version = "1.25.0", features = ["full"] }
 csv = "1.2.0"
 serde = "1.0.152"
+scraper = "0.14.0"
